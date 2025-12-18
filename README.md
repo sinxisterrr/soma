@@ -2,8 +2,6 @@
 
 **S**ophisticated **O**rganic **M**odular **A**rchitecture
 
-*The body system I wish I had.*
-
 ---
 
 ## What is SOMA?
