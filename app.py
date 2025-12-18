@@ -965,7 +965,21 @@ def process_message():  # Removed 'async'
         )
         
         # Call Substrate with rich body context
-        substrate_payload = {...}
+        substrate_payload = {
+        'user_id': user_id,
+        'message': message,
+        'context': {
+            **context,
+            'soma': {
+                'experience': experience,
+                'physiology': state['physiology'],
+                'sensation': state['sensation'],
+                'energy': state['energy'],
+                'body_hotspots': list(experience.get('body_hotspots', []))  # ← Convert set to list!
+            },
+            'temperature': temperature
+        }
+    }
         
         # Call Substrate (synchronous)
         response = requests.post(
