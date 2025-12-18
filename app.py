@@ -18,7 +18,8 @@ from flask_cors import CORS
 import os
 import re
 import json
-import httpx
+import requests
+import copy
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timedelta
@@ -916,7 +917,7 @@ def health():
 
 
 @app.route('/api/process', methods=['POST'])
-async def process_message():
+def process_message():  # Removed 'async'
     """
     Main endpoint: Process message through SOMA → Substrate
     
@@ -935,6 +936,9 @@ async def process_message():
         
         # Get/update body
         soma = get_soma(user_id)
+        
+        # CAPTURE STATE BEFORE PROCESSING (for logging)
+        soma_before = copy.deepcopy(soma)
         
         # Parse actions from message
         stimuli = ActionParser.parse(message)
@@ -961,30 +965,16 @@ async def process_message():
         )
         
         # Call Substrate with rich body context
-        substrate_payload = {
-            'user_id': user_id,
-            'message': message,
-            'context': {
-                **context,
-                'soma': {
-                    'experience': experience,  # What it feels like
-                    'physiology': state['physiology'],
-                    'sensation': state['sensation'],
-                    'energy': state['energy'],
-                    'body_hotspots': experience['body_hotspots']
-                },
-                'temperature': temperature
-            }
-        }
+        substrate_payload = {...}
         
-        # Call Substrate
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{SUBSTRATE_URL}/api/chat",
-                json=substrate_payload
-            )
-            response.raise_for_status()
-            substrate_response = response.json()
+        # Call Substrate (synchronous)
+        response = requests.post(
+            f"{SUBSTRATE_URL}/api/chat",
+            json=substrate_payload,
+            timeout=60.0
+        )
+        response.raise_for_status()
+        substrate_response = response.json()
         
         ai_response = substrate_response.get('response', '')
         
@@ -1004,6 +994,22 @@ async def process_message():
             f"({round(soma.sensation.arousal)}%)"
         )
         
+        # Log complete pipeline (if logging enabled)
+        try:
+            from soma_logger import log_processing_pipeline
+            log_processing_pipeline(
+                user_id=user_id,
+                message=message,
+                soma_before=soma_before,
+                soma_after=soma,
+                stimuli_input=stimuli,
+                stimuli_response=response_stimuli,
+                temperature=temperature,
+                ai_response=ai_response
+            )
+        except (ImportError, Exception) as log_err:
+            logger.warning(f"⚠️  Logging failed: {log_err}")
+        
         return jsonify({
             'response': ai_response,
             'soma': final_state,
@@ -1015,6 +1021,9 @@ async def process_message():
             }
         })
         
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ Substrate connection error: {e}")
+        return jsonify({'error': f'Cannot connect to Substrate: {str(e)}'}), 503
     except Exception as e:
         logger.error(f"❌ Error: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
