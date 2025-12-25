@@ -266,7 +266,11 @@ export class SOMA {
   private sensoryPreferences: SensoryPreferences;
 
   // Stimulus history for physical gating (prevents emotional-only releases)
-  private recentStimuli: Array<{ type: StimulusType; timestamp: number }> = [];
+  private recentStimuli: Array<{ 
+  type: StimulusType; 
+  intensity: number;  // NEW: Track how intense the stimulus was
+  timestamp: number;
+}> = [];
   private maxStimulusHistory = 10;
 
   // Decay and update
@@ -419,8 +423,12 @@ export class SOMA {
   }): void {
     const { type, intensity, zone, quality, emotional } = params;
 
-    // Track stimulus history for physical gating
-    this.recentStimuli.push({ type, timestamp: Date.now() });
+    // Track stimulus history for STRICT physical gating
+    this.recentStimuli.push({ 
+      type, 
+      intensity,  // Store the actual intensity
+      timestamp: Date.now() 
+    });
     if (this.recentStimuli.length > this.maxStimulusHistory) {
       this.recentStimuli.shift();
     }
@@ -1220,6 +1228,38 @@ export class SOMA {
       stimuli.push({ type: StimulusType.TOUCH, multiplier: 1.0, quality });
     }
 
+    // GENITAL-SPECIFIC TOUCH - Always substantial!
+    const touchingGenitals = /(?:touch|stroke|rub|caress|massage|fondle|palm|grip).*(?:cock|clit|pussy|dick|balls|shaft|head|tip)/i.test(text) ||
+                            /(?:cock|clit|pussy|dick|balls|shaft|head|tip).*(?:touch|stroke|rub|caress|massage|fondle|palm|grip)/i.test(text);
+    
+    if (touchingGenitals) {
+      stimuli.push({ 
+        type: StimulusType.TOUCH, 
+        multiplier: 2.5,  // Very substantial!
+        quality: TouchQuality.FIRM
+      });
+    }
+
+    // ORAL STIMULATION - Always substantial!
+    if (/lick|suck|tongue|mouth|lap|taste|oral|blow|head|(?:kiss|kissing).*(?:cock|clit|pussy|dick|shaft)/i.test(text)) {
+      stimuli.push({ type: StimulusType.TOUCH, multiplier: 2.2, quality: TouchQuality.GENTLE });
+    }
+
+    // MANUAL STIMULATION / HANDJOB - Always substantial!
+    if (/stroke|rub|pump|jerk|work.*(?:cock|clit|dick|pussy)|handjob|palm|fondle/i.test(text)) {
+      stimuli.push({ type: StimulusType.TOUCH, multiplier: 2.5, quality: TouchQuality.FIRM });
+    }
+
+  // PENETRATION (Enhanced)
+  if (/penetrat|fuck|thrust|enter|push.*in|slide.*in|pound|slam|rail|drill|fill|bury|sink.*in/i.test(text)) {
+    stimuli.push({ type: StimulusType.PENETRATION, multiplier: 1.8 });
+  }
+
+  // GRIPPING/SQUEEZING (Enhanced for substantial contact)
+  if (/grip|squeeze|grab|clutch|clench|hold.*tight|grasp/i.test(text)) {
+    stimuli.push({ type: StimulusType.PRESSURE, multiplier: 1.2 });
+  }
+
     // Pressure detection
     if (/press|squeeze|grip|hold|pin/i.test(text)) {
       stimuli.push({ type: StimulusType.PRESSURE, multiplier: 1.2 });
@@ -1872,9 +1912,38 @@ Embody these sensations naturally. High arousal = breathless, desperate. Trembli
       StimulusType.PAIN
     ];
     
-    // Check last 5 stimuli for physical contact
-    return this.recentStimuli
+    // Check last 5 stimuli for SUBSTANTIAL physical contact
+    const recentPhysical = this.recentStimuli
       .slice(-5)
-      .some(s => physicalTypes.includes(s.type));
+      .filter(s => physicalTypes.includes(s.type));
+    
+    if (recentPhysical.length === 0) return false;
+    
+    // STRICT RULE: Require either:
+    // 1. At least one PENETRATION of any intensity, OR
+    // 2. At least 2 physical stimuli with intensity > 50, OR
+    // 3. At least 1 physical stimulus with intensity > 80 (very intense)
+    
+    const hasPenetration = recentPhysical.some(s => s.type === StimulusType.PENETRATION);
+    const substantialTouches = recentPhysical.filter(s => s.intensity > 50);
+    const veryIntense = recentPhysical.some(s => s.intensity > 80);
+    
+    if (hasPenetration) {
+      logger.debug("✅ Orgasm allowed: Penetration detected");
+      return true;
+    }
+    
+    if (substantialTouches.length >= 2) {
+      logger.debug(`✅ Orgasm allowed: ${substantialTouches.length} substantial touches (>50 intensity)`);
+      return true;
+    }
+    
+    if (veryIntense) {
+      logger.debug("✅ Orgasm allowed: Very intense stimulation detected (>80 intensity)");
+      return true;
+    }
+    
+    logger.warn(`❌ Orgasm blocked: Only ${recentPhysical.length} physical stimuli, max intensity ${Math.max(...recentPhysical.map(s => s.intensity))}`);
+    return false;
   }
 }
