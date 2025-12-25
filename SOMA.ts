@@ -1570,9 +1570,19 @@ export class SOMA {
     // Decay sensations (slower decay if high arousal - harder to calm down)
     const decayMultiplier = currentArousal > 70 ? 0.98 : 0.94;
     this.sensations.arousal *= decayMultiplier;
-    this.sensations.pleasure *= 0.92;  // Pleasure/displeasure fades
+    // Pleasure/displeasure fades (negative values recover faster)
+    if (this.sensations.pleasure < 0) {
+      this.sensations.pleasure = Math.min(0, this.sensations.pleasure * 0.70);  // Faster recovery from displeasure
+    } else {
+      this.sensations.pleasure *= 0.92;
+    }  // Pleasure/displeasure fades
     this.sensations.pain *= 0.85;
-    this.sensations.warmth *= 0.90;
+    // Warmth returns to baseline (faster when extremely cold/hot)
+    if (Math.abs(this.sensations.warmth) > 30) {
+      this.sensations.warmth *= 0.75;  // Faster return from extremes
+    } else {
+      this.sensations.warmth *= 0.90;
+    }
     this.sensations.pressure *= 0.88;
     this.sensations.tingles *= 0.85;
     this.sensations.ache *= 0.90;
@@ -1582,7 +1592,12 @@ export class SOMA {
     this.sensations.texture *= 0.88;        // Texture sensation fades
     this.sensations.fullness *= 0.90;       // Fullness fades
     this.sensations.emptiness *= 0.95;      // Yearning slowly reduces
-    this.sensations.comfort += (50 - this.sensations.comfort) * 0.05;  // Returns to baseline comfort
+    // Returns to baseline comfort (faster recovery from extreme discomfort)
+    if (this.sensations.comfort < 0) {
+      this.sensations.comfort += (50 - this.sensations.comfort) * 0.15;  // 3x faster recovery when negative
+    } else {
+      this.sensations.comfort += (50 - this.sensations.comfort) * 0.05;
+    }
     this.sensations.relaxation += (60 - this.sensations.relaxation) * 0.06;  // Returns to baseline relaxation
 
     // Neurochemical homeostasis
