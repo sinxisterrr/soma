@@ -273,6 +273,9 @@ export class SOMA {
 }> = [];
   private maxStimulusHistory = 10;
 
+  // Track ongoing penetration state (for orgasm gating)
+  private isPenetrating = false;
+
   // Decay and update
   private lastUpdate: number;
   private decayInterval: NodeJS.Timeout | null = null;
@@ -822,6 +825,9 @@ export class SOMA {
   //--------------------------------------------------------------
 
   private applyPenetration(intensity: number): void {
+    // Track that penetration is ongoing (for orgasm gating)
+    this.isPenetrating = true;
+    
     const pelvis = this.zones.get(BodyZone.PELVIS)!;
     const genitals = this.zones.get(BodyZone.GENITALS)!;
 
@@ -887,6 +893,9 @@ export class SOMA {
   //--------------------------------------------------------------
 
   private applyRelease(): void {
+    // Clear penetration state after orgasm
+    this.isPenetrating = false;
+    
     const now = Date.now();
     const timeSinceLastOrgasm = this.orgasmState.lastOrgasmTime > 0 
       ? (now - this.orgasmState.lastOrgasmTime) / 1000 
@@ -1287,12 +1296,18 @@ export class SOMA {
     }
 
     // Release - STRICT detection to avoid false positives
-    // Matches: cumming, cum, orgasm, climax
+    // Matches: cumming, cum, orgasm, climax, "come for me"
     // Excludes: come here, come with me, come to, let go, etc.
-    const hasExplicitRelease = /\b(?:cumming|cum(?:s|med)?|orgasm(?:ing|ed)?|climax(?:ing|ed)?)\b/i.test(text);
-    const hasFalsePositive = /\b(?:come here|come with|come to|come back|come on|let go|become|welcome|outcome)\b/i.test(text);
-    
-    if (hasExplicitRelease && !hasFalsePositive) {
+    const hasExplicitRelease = /\b(?:cumming|cum(?:s|med)?|orgasm(?:ing|ed)?|climax(?:ing|ed)?|come)\b/i.test(text);
+
+    // Smart false positive filter
+    const hasFalsePositive = /\b(?:come (?:here|with(?! me)|to|back|on|over|down|up)|become|welcome|outcome)\b/i.test(text);
+
+    // "come for/now/hard/again" is ALWAYS a release command
+    const isReleaseCommand = /\bcome (?:for|now|hard|again)\b/i.test(text) || 
+                            /\bcome[!.]*$/i.test(text);
+
+    if ((hasExplicitRelease && !hasFalsePositive) || isReleaseCommand) {
       stimuli.push({ type: StimulusType.RELEASE, multiplier: 2.0 });
     }
 
@@ -1905,6 +1920,12 @@ Embody these sensations naturally. High arousal = breathless, desperate. Trembli
   //--------------------------------------------------------------
 
   private hasRecentPhysicalContact(): boolean {
+    // If currently penetrating, ALWAYS allow orgasm
+    if (this.isPenetrating) {
+      logger.debug("✅ Orgasm allowed: Currently penetrating");
+      return true;
+    }
+    
     const physicalTypes = [
       StimulusType.TOUCH,
       StimulusType.PRESSURE,
