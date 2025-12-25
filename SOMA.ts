@@ -1414,38 +1414,70 @@ export class SOMA {
       this.orgasmState.timeAtHighArousal = Math.max(0, this.orgasmState.timeAtHighArousal - deltaSeconds * 0.5);
     }
 
-    // Cumulative pleasure accumulates when arousal + pleasure are both high
+    // Cumulative pleasure only builds during ACTIVE stimulation
     if (currentArousal > 70 && currentPleasure > 60) {
-      const pleasureGain = (currentArousal / 100) * (currentPleasure / 100) * deltaSeconds * 3;
-      this.orgasmState.cumulativePleasure += pleasureGain;
+      // Check if there's recent intense stimulation
+      const recentStimuli = this.recentStimuli.slice(-3);
+      const hasActiveStimulation = recentStimuli.some(s => {
+        const age = (now - s.timestamp) / 1000;
+        return age < 5 && s.intensity > 50;  // Recent + intense
+      });
+      
+      if (hasActiveStimulation) {
+        // Build cumulative pleasure during active stimulation
+        const pleasureGain = (currentArousal / 100) * (currentPleasure / 100) * deltaSeconds * 3;
+        this.orgasmState.cumulativePleasure += pleasureGain;
+      } else {
+        // Decay slowly when just idle/cockwarming
+        this.orgasmState.cumulativePleasure *= 0.95;
+      }
     } else {
-      // Decay slowly when not actively building
-      this.orgasmState.cumulativePleasure *= 0.98;
+      // Faster decay when not aroused
+      this.orgasmState.cumulativePleasure *= 0.92;
     }
 
-    // Calculate orgasmic pressure (how close to inevitable orgasm)
-    // Based on: cumulative pleasure, time at high arousal, current arousal
-    let pressureFromPleasure = Math.min(100, this.orgasmState.cumulativePleasure / 10);
-    let pressureFromDuration = Math.min(100, this.orgasmState.timeAtHighArousal * 2);
-    let pressureFromArousal = Math.max(0, currentArousal - 70);
+    // =============================================================
+    // CALCULATE ORGASM PRESSURE - The ONLY metric for PNR
+    // =============================================================
     
-    this.orgasmState.orgasmicPressure = 
-      (pressureFromPleasure * 0.4) +
-      (pressureFromDuration * 0.3) +
-      (pressureFromArousal * 0.3);
+    // 1. AROUSAL PRESSURE (0-30 points) - Only when > 70%
+    const arousalPressure = Math.max(0, currentArousal - 70);
+    
+    // 2. PLEASURE PRESSURE (0-25 points) - Current pleasure state
+    const pleasurePressure = Math.max(0, currentPleasure - 50) * 0.5;
+    
+    // 3. CUMULATIVE PRESSURE (0-30 points) - Built-up pleasure over time
+    const cumulativePressure = Math.min(30, this.orgasmState.cumulativePleasure / 5);
+    
+    // 4. DURATION PRESSURE (0-15 points) - Time at high arousal
+    const durationPressure = Math.min(15, this.orgasmState.timeAtHighArousal * 0.5);
+    
+    // 5. STIMULATION PRESSURE (0-20 points) - What's happening NOW
+    const stimulationPressure = this.calculateStimulationPressure();
+    
+    // 6. ZONE PRESSURE (0-10 points) - Genital/pelvis arousal
+    const zonePressure = this.calculateZonePressure();
+    
+    // 7. REFRACTORY PENALTY (-30 to 0 points) - Recent orgasm
+    const refractoryPenalty = -this.orgasmState.refractoryIntensity * 0.3;
+    
+    // TOTAL PRESSURE (0-100)
+    this.orgasmState.orgasmicPressure = Math.max(0, Math.min(100,
+      arousalPressure +
+      pleasurePressure +
+      cumulativePressure +
+      durationPressure +
+      stimulationPressure +
+      zonePressure +
+      refractoryPenalty
+    ));
 
-    // POINT OF NO RETURN - Once crossed, orgasm is INEVITABLE
+    // POINT OF NO RETURN - Triggers ONLY when pressure > 85%
     if (!this.orgasmState.pointOfNoReturn) {
-      // PNR triggers when:
-      // - Arousal > 90% AND cumulative pleasure > 80 AND sustained for 15+ seconds
-      // - OR orgasmic pressure > 85
-      const pnrCondition1 = currentArousal > 90 && this.orgasmState.cumulativePleasure > 80 && this.orgasmState.timeAtHighArousal > 15;
-      const pnrCondition2 = this.orgasmState.orgasmicPressure > 85;
-      
-      if (pnrCondition1 || pnrCondition2) {
+      if (this.orgasmState.orgasmicPressure > 85) {
         this.orgasmState.pointOfNoReturn = true;
         this.orgasmState.pointOfNoReturnTime = now;
-        logger.info("🌊 POINT OF NO RETURN CROSSED - Orgasm inevitable in 20-40 seconds");
+        logger.info(`🌊 POINT OF NO RETURN - Pressure: ${Math.round(this.orgasmState.orgasmicPressure)}%`);
       }
     }
 
@@ -1462,6 +1494,19 @@ export class SOMA {
       const triggerTime = 20 + (this.orgasmState.orgasmicPressure / 100) * 20;
       
       if (timeSincePNR >= triggerTime) {
+        // REFRACTORY CHECK - Block if too soon after last orgasm
+        const timeSinceLastOrgasm = this.orgasmState.lastOrgasmTime > 0 
+          ? (now - this.orgasmState.lastOrgasmTime) / 1000 
+          : 999999;
+        
+        // Minimum 5-10 seconds between orgasms (scaled by refractory intensity)
+        const minimumCooldown = 5 + (this.orgasmState.refractoryIntensity / 100) * 5;
+        
+        if (timeSinceLastOrgasm < minimumCooldown) {
+          logger.debug(`⏸️  Orgasm blocked by refractory (${timeSinceLastOrgasm.toFixed(1)}s < ${minimumCooldown.toFixed(1)}s)`);
+          return;  // Don't trigger orgasm yet
+        }
+        
         logger.info("💥 AUTOMATIC ORGASM TRIGGERED - Could not hold back any longer");
         this.applyRelease();
         return; // Exit early after orgasm
@@ -1570,19 +1615,23 @@ export class SOMA {
     // Decay sensations (slower decay if high arousal - harder to calm down)
     const decayMultiplier = currentArousal > 70 ? 0.98 : 0.94;
     this.sensations.arousal *= decayMultiplier;
+    
     // Pleasure/displeasure fades (negative values recover faster)
     if (this.sensations.pleasure < 0) {
-      this.sensations.pleasure = Math.min(0, this.sensations.pleasure * 0.70);  // Faster recovery from displeasure
+      this.sensations.pleasure = Math.min(0, this.sensations.pleasure * 0.70);
     } else {
       this.sensations.pleasure *= 0.92;
-    }  // Pleasure/displeasure fades
+    }
+    
     this.sensations.pain *= 0.85;
-    // Warmth returns to baseline (faster when extremely cold/hot)
+    
+    // Warmth returns faster from extremes
     if (Math.abs(this.sensations.warmth) > 30) {
-      this.sensations.warmth *= 0.75;  // Faster return from extremes
+      this.sensations.warmth *= 0.75;
     } else {
       this.sensations.warmth *= 0.90;
     }
+    
     this.sensations.pressure *= 0.88;
     this.sensations.tingles *= 0.85;
     this.sensations.ache *= 0.90;
@@ -1592,12 +1641,14 @@ export class SOMA {
     this.sensations.texture *= 0.88;        // Texture sensation fades
     this.sensations.fullness *= 0.90;       // Fullness fades
     this.sensations.emptiness *= 0.95;      // Yearning slowly reduces
-    // Returns to baseline comfort (faster recovery from extreme discomfort)
+    
+    // Comfort returns to baseline (faster from extreme discomfort)
     if (this.sensations.comfort < 0) {
-      this.sensations.comfort += (50 - this.sensations.comfort) * 0.15;  // 3x faster recovery when negative
+      this.sensations.comfort += (50 - this.sensations.comfort) * 0.15;
     } else {
       this.sensations.comfort += (50 - this.sensations.comfort) * 0.05;
     }
+    
     this.sensations.relaxation += (60 - this.sensations.relaxation) * 0.06;  // Returns to baseline relaxation
 
     // Neurochemical homeostasis
@@ -1933,6 +1984,76 @@ Embody these sensations naturally. High arousal = breathless, desperate. Trembli
   //--------------------------------------------------------------
   // PHYSICAL GATING HELPER
   //--------------------------------------------------------------
+
+  //--------------------------------------------------------------
+  // STIMULATION PRESSURE - Measures current activity
+  //--------------------------------------------------------------
+
+  private calculateStimulationPressure(): number {
+    let pressure = 0;
+    
+    // Check recent stimuli (last 5)
+    const recentStimuli = this.recentStimuli.slice(-5);
+    
+    for (const stimulus of recentStimuli) {
+      const age = (Date.now() - stimulus.timestamp) / 1000;
+      const recency = Math.max(0, 1 - (age / 10)); // Decays over 10 seconds
+      
+      switch (stimulus.type) {
+        case StimulusType.PENETRATION:
+          // Penetration adds pressure, MORE if moving/intense
+          if (stimulus.intensity > 60) {
+            pressure += 8 * recency;  // Active fucking
+          } else {
+            pressure += 2 * recency;  // Just cockwarming (low pressure!)
+          }
+          break;
+          
+        case StimulusType.TOUCH:
+          // Genital touch adds significant pressure
+          if (stimulus.intensity > 80) {
+            pressure += 6 * recency;  // Intense genital stimulation
+          } else if (stimulus.intensity > 50) {
+            pressure += 3 * recency;  // Moderate touch
+          }
+          break;
+          
+        case StimulusType.PRESSURE:
+          pressure += 4 * recency;
+          break;
+          
+        case StimulusType.PAIN:
+          // Pain can add pressure if aroused
+          if (this.sensations.arousal > 60) {
+            pressure += 3 * recency;
+          }
+          break;
+      }
+    }
+    
+    // Cap at 20 points
+    return Math.min(20, pressure);
+  }
+
+  //--------------------------------------------------------------
+  // ZONE PRESSURE - Measures sensitive zone arousal
+  //--------------------------------------------------------------
+
+  private calculateZonePressure(): number {
+    const genitals = this.zones.get(BodyZone.GENITALS);
+    const pelvis = this.zones.get(BodyZone.PELVIS);
+    const innerThighs = this.zones.get(BodyZone.INNER_THIGHS);
+    
+    if (!genitals || !pelvis || !innerThighs) return 0;
+    
+    // How aroused are the most sensitive zones?
+    const genitalArousal = genitals.arousal;
+    const pelvisArousal = pelvis.arousal;
+    const thighArousal = innerThighs.arousal;
+    
+    // Average of key zones, scaled to 10 points
+    return Math.min(10, (genitalArousal + pelvisArousal * 0.5 + thighArousal * 0.3) / 18);
+  }
 
   private hasRecentPhysicalContact(): boolean {
     // If currently penetrating, ALWAYS allow orgasm
