@@ -601,20 +601,6 @@ export class SOMA {
         break;
 
       case StimulusType.RELEASE:
-        // ⚠️ CRITICAL: Check if orgasm is actually possible
-        if (this.orgasmState.orgasmicPressure < 75) {
-          logger.warn(`⚠️ Release blocked - pressure only ${Math.round(this.orgasmState.orgasmicPressure)}%. Converting to edge.`);
-          this.applyEdge(60);
-          return;
-        }
-        
-        // Additional refractory check
-        if (this.orgasmState.refractoryIntensity > 30) {
-          logger.warn(`⚠️ Release blocked - still in refractory (${Math.round(this.orgasmState.refractoryIntensity)}%). Converting to edge.`);
-          this.applyEdge(60);
-          return;
-        }
-        
         this.applyRelease();
         break;
 
@@ -622,7 +608,7 @@ export class SOMA {
         this.applyEmotional(emotional!, intensity);
         break;
     }
-    
+
     // Record in touch history
     if (zone) {
       this.preferences.touchHistory.push({
@@ -2369,6 +2355,13 @@ You're completely present, completely his, completely yourself.]`;
       const age = (Date.now() - stimulus.timestamp) / 1000;
       const recency = Math.max(0, 1 - (age / 10)); // Decays over 10 seconds
       
+      // ⚠️ CRITICAL: Only PHYSICAL stimuli with zones contribute to orgasm pressure!
+      // Emotional/conversational stimuli can increase arousal/pleasure,
+      // but they don't build pressure toward physical orgasm
+      if (!stimulus.zone) {
+        continue; // Skip stimuli without zones (praise, degradation, conversation)
+      }
+      
       switch (stimulus.type) {
         case StimulusType.PENETRATION:
           // Penetration adds pressure, MORE if moving/intense
@@ -2380,24 +2373,36 @@ You're completely present, completely his, completely yourself.]`;
           break;
           
         case StimulusType.TOUCH:
-          // Genital touch adds significant pressure
-          if (stimulus.intensity > 80) {
-            pressure += 6 * recency;  // Intense genital stimulation
-          } else if (stimulus.intensity > 50) {
-            pressure += 3 * recency;  // Moderate touch
+          // Only erogenous zones contribute significantly to orgasm pressure!
+          if (EROGENOUS_ZONES.has(stimulus.zone)) {
+            if (stimulus.intensity > 80) {
+              pressure += 6 * recency;  // Intense genital stimulation
+            } else if (stimulus.intensity > 50) {
+              pressure += 3 * recency;  // Moderate touch
+            }
+          }
+          // Non-erogenous touch adds minimal pressure
+          else if (stimulus.intensity > 70) {
+            pressure += 1 * recency;  // Light contribution from other zones
           }
           break;
           
         case StimulusType.PRESSURE:
-          pressure += 4 * recency;
+          // Only if on erogenous zones
+          if (EROGENOUS_ZONES.has(stimulus.zone)) {
+            pressure += 4 * recency;
+          }
           break;
           
         case StimulusType.PAIN:
-          // Pain can add pressure if aroused
-          if (this.sensations.arousal > 60) {
+          // Pain can add pressure if aroused AND on erogenous zones
+          if (this.sensations.arousal > 60 && EROGENOUS_ZONES.has(stimulus.zone)) {
             pressure += 3 * recency;
           }
           break;
+          
+        // EMOTIONAL stimuli are explicitly excluded - they don't have zones!
+        // They can still increase arousal/euphoria through other pathways
       }
     }
     
