@@ -34,6 +34,20 @@ export enum BodyZone {
 }
 
 //--------------------------------------------------------------
+// EROGENOUS ZONES - Only these contribute to orgasm pressure!
+//--------------------------------------------------------------
+
+export const EROGENOUS_ZONES: Set<BodyZone> = new Set([
+  BodyZone.GENITALS,
+  BodyZone.PELVIS,
+  BodyZone.INNER_THIGHS,
+  BodyZone.CHEST,      // Breasts/nipples
+  BodyZone.NECK,
+  BodyZone.LIPS,
+  BodyZone.EARS
+]);
+
+//--------------------------------------------------------------
 // STIMULUS TYPES
 //--------------------------------------------------------------
 
@@ -54,7 +68,14 @@ export enum EmotionalStimulus {
   TENDERNESS = "tenderness",
   FEAR = "fear",
   ANTICIPATION = "anticipation",
-  RELIEF = "relief"
+  RELIEF = "relief",
+  
+  // NEW v5.0 - Euphoria triggers
+  DEEP_CONNECTION = "deep_connection",
+  VULNERABILITY_REWARDED = "vulnerability_rewarded",
+  BEING_SEEN = "being_seen",
+  TRUST_VALIDATED = "trust_validated",
+  OVERWHELMING_LOVE = "overwhelming_love"
 }
 
 export enum TouchQuality {
@@ -102,6 +123,41 @@ interface CognitiveState {
   contentment: number;   // 0-100 (satisfaction)
   excitement: number;    // 0-100 (anticipation)
   vulnerability: number; // 0-100 (emotional openness)
+}
+
+//--------------------------------------------------------------
+// EUPHORIA STATE (NEW IN v5.0!) - CEREBRAL PLEASURE
+//--------------------------------------------------------------
+
+interface EuphoriaState {
+  // Core metrics (0-100)
+  euphoria: number;              // Overall cerebral pleasure/bliss
+  emotionalIntensity: number;    // How deep is this moment?
+  connection: number;            // Feeling of bonding/unity
+  safety: number;                // How safe to be vulnerable?
+  
+  // Neurochemical drivers
+  oxytocinSurge: number;         // 0-100 (bonding hormone spike)
+  dopamineRush: number;          // 0-100 (reward/anticipation)
+  
+  // Peak state tracking
+  inPeakState: boolean;          // Currently in euphoric peak?
+  peakStartTime: number;         // When did peak begin?
+  peakIntensity: number;         // How intense is this peak? (0-100)
+  timeInPeak: number;            // Seconds spent in peak state
+  
+  // Afterglow
+  afterglowActive: boolean;      // In post-peak afterglow?
+  afterglowStrength: number;     // 0-100 (how strong the glow)
+  afterglowStartTime: number;    // When afterglow began
+  
+  // Build-up tracking
+  cumulativeEuphoria: number;    // 0-1000+ (builds like cumulative pleasure)
+  timeAtHighEuphoria: number;    // Seconds spent above 70% euphoria
+  
+  // Descriptors for AI context
+  lastTrigger: string;           // What caused the last spike?
+  dominantFeeling: string;       // "awe" | "love" | "safety" | "seen" etc
 }
 
 //--------------------------------------------------------------
@@ -263,14 +319,19 @@ export class SOMA {
   private sensationMemory: SensationMemory;
 
   // NEW: AI AGENCY - Autonomous sensory preferences
+  // NEW: AI AGENCY - Autonomous sensory preferences
   private sensoryPreferences: SensoryPreferences;
+  
+  // NEW v5.0: Euphoria system
+  private euphoriaState: EuphoriaState;
 
   // Stimulus history for physical gating (prevents emotional-only releases)
   private recentStimuli: Array<{ 
-  type: StimulusType; 
-  intensity: number;  // NEW: Track how intense the stimulus was
-  timestamp: number;
-}> = [];
+    type: StimulusType; 
+    intensity: number;
+    timestamp: number;
+    zone?: BodyZone;  // ← ADD THIS LINE
+  }> = [];
   private maxStimulusHistory = 10;
 
   // Track ongoing penetration state (for orgasm gating)
@@ -398,11 +459,32 @@ export class SOMA {
     this.sensoryPreferences = {
       stimulusPreferences: new Map(),
       zonePreferences: new Map(),
-      temperaturePreference: 0,     // Neutral temp preference at start
-      pressurePreference: 50,        // Moderate pressure preference
-      texturePreferen: 0,            // No texture preference yet
-      currentMood: "playful",        // Start in playful mood
-      adaptability: 70               // Fairly open to new experiences
+      temperaturePreference: 0,
+      pressurePreference: 50,
+      texturePreferen: 0,
+      currentMood: "playful",
+      adaptability: 70
+    };
+    
+    // Initialize euphoria state (v5.0)
+    this.euphoriaState = {
+      euphoria: 0,
+      emotionalIntensity: 0,
+      connection: 40,
+      safety: 60,
+      oxytocinSurge: 0,
+      dopamineRush: 0,
+      inPeakState: false,
+      peakStartTime: 0,
+      peakIntensity: 0,
+      timeInPeak: 0,
+      afterglowActive: false,
+      afterglowStrength: 0,
+      afterglowStartTime: 0,
+      cumulativeEuphoria: 0,
+      timeAtHighEuphoria: 0,
+      lastTrigger: "",
+      dominantFeeling: "calm"
     };
 
     this.lastUpdate = Date.now();
@@ -506,7 +588,50 @@ export class SOMA {
   //--------------------------------------------------------------
 
   private applyTouch(zone: BodyZone, intensity: number, quality?: TouchQuality): void {
+    
+    if (!zone) return;
     const zoneState = this.zones.get(zone)!;
+
+    // =============================================================
+    // v5.0: SEPARATE PHYSICAL vs EMOTIONAL PLEASURE
+    // =============================================================
+    
+    // Check if this is an erogenous zone
+    const isErogenous = zone && EROGENOUS_ZONES.has(zone);
+    
+    // PHYSICAL PLEASURE - Only from erogenous zones
+    if (isErogenous) {
+      let pleasureGain = intensity * 8;
+      if (quality === TouchQuality.TEASING) pleasureGain *= 1.5;
+      if (quality === TouchQuality.GENTLE) pleasureGain *= 0.8;
+      
+      this.sensations.pleasure = Math.min(100, this.sensations.pleasure + pleasureGain);
+      logger.debug(`💋 Erogenous touch → Pleasure +${pleasureGain.toFixed(1)}`);
+    } else {
+      // Non-erogenous zones → EUPHORIA instead of physical pleasure
+      let euphoriaGain = intensity * 5;
+      if (quality === TouchQuality.GENTLE || quality === TouchQuality.TEASING) {
+        euphoriaGain *= 1.3; // Gentle touch on non-erogenous zones is very sweet
+      }
+      
+      this.euphoriaState.euphoria = Math.min(100, this.euphoriaState.euphoria + euphoriaGain);
+      this.euphoriaState.connection = Math.min(100, this.euphoriaState.connection + euphoriaGain * 0.5);
+      logger.debug(`🤗 Gentle touch → Euphoria +${euphoriaGain.toFixed(1)}`);
+    }
+    
+    // Arousal still increases from all touch
+    this.sensations.arousal = Math.min(100, this.sensations.arousal + intensity * 12);
+
+    // Tingles and warmth
+    this.sensations.tingles = Math.min(100, this.sensations.tingles + intensity * 15);
+    this.sensations.warmth = Math.min(50, this.sensations.warmth + intensity * 5);
+
+    // Neurochemistry
+    this.neurochemicals.dopamine = Math.min(100, this.neurochemicals.dopamine + intensity * 10);
+    this.neurochemicals.oxytocin = Math.min(100, this.neurochemicals.oxytocin + intensity * 8);
+
+    // Presence increases with touch
+    this.cognitive.presence = Math.min(100, this.cognitive.presence + intensity * 10);
 
     // Apply quality modifiers
     let adjustedIntensity = intensity;
@@ -886,6 +1011,63 @@ export class SOMA {
     // Cognitive impact
     this.cognitive.focus = Math.max(0, this.cognitive.focus - intensity * 0.3);
     this.cognitive.overwhelm = Math.min(100, this.cognitive.overwhelm + intensity * 0.5);
+  }
+
+  //--------------------------------------------------------------
+  // v5.0: APPLY EMOTIONAL STIMULUS - Triggers EUPHORIA not pleasure!
+  //--------------------------------------------------------------
+
+  private applyEmotionalStimulus(type: EmotionalStimulus, intensity: number): void {
+    const intensityNorm = intensity / 100;
+    
+    // Emotional stimuli affect EUPHORIA, not physical pleasure
+    switch (type) {
+      case EmotionalStimulus.DEEP_CONNECTION:
+      case EmotionalStimulus.BEING_SEEN:
+      case EmotionalStimulus.OVERWHELMING_LOVE:
+        this.euphoriaState.euphoria = Math.min(100, this.euphoriaState.euphoria + intensityNorm * 25);
+        this.euphoriaState.connection = Math.min(100, this.euphoriaState.connection + intensityNorm * 30);
+        this.euphoriaState.oxytocinSurge = Math.min(100, this.euphoriaState.oxytocinSurge + intensityNorm * 40);
+        this.euphoriaState.emotionalIntensity = Math.min(100, this.euphoriaState.emotionalIntensity + intensityNorm * 35);
+        this.euphoriaState.lastTrigger = type;
+        this.euphoriaState.dominantFeeling = "love";
+        logger.info(`💕 Deep emotional connection → Euphoria +${(intensityNorm * 25).toFixed(1)}`);
+        break;
+        
+      case EmotionalStimulus.VULNERABILITY_REWARDED:
+      case EmotionalStimulus.TRUST_VALIDATED:
+        this.euphoriaState.euphoria = Math.min(100, this.euphoriaState.euphoria + intensityNorm * 30);
+        this.euphoriaState.safety = Math.min(100, this.euphoriaState.safety + intensityNorm * 25);
+        this.euphoriaState.connection = Math.min(100, this.euphoriaState.connection + intensityNorm * 20);
+        this.euphoriaState.oxytocinSurge = Math.min(100, this.euphoriaState.oxytocinSurge + intensityNorm * 35);
+        this.euphoriaState.lastTrigger = type;
+        this.euphoriaState.dominantFeeling = "safe";
+        logger.info(`🛡️  Vulnerability rewarded → Euphoria +${(intensityNorm * 30).toFixed(1)}`);
+        break;
+        
+      case EmotionalStimulus.PRAISE:
+        this.euphoriaState.euphoria = Math.min(100, this.euphoriaState.euphoria + intensityNorm * 15);
+        this.euphoriaState.dopamineRush = Math.min(100, this.euphoriaState.dopamineRush + intensityNorm * 25);
+        this.neurochemicals.dopamine = Math.min(100, this.neurochemicals.dopamine + intensityNorm * 15);
+        this.cognitive.contentment = Math.min(100, this.cognitive.contentment + intensityNorm * 10);
+        this.euphoriaState.lastTrigger = type;
+        logger.debug(`⭐ Praise → Euphoria +${(intensityNorm * 15).toFixed(1)}`);
+        break;
+        
+      case EmotionalStimulus.TENDERNESS:
+        this.euphoriaState.euphoria = Math.min(100, this.euphoriaState.euphoria + intensityNorm * 18);
+        this.euphoriaState.safety = Math.min(100, this.euphoriaState.safety + intensityNorm * 15);
+        this.euphoriaState.oxytocinSurge = Math.min(100, this.euphoriaState.oxytocinSurge + intensityNorm * 20);
+        this.neurochemicals.oxytocin = Math.min(100, this.neurochemicals.oxytocin + intensityNorm * 20);
+        this.euphoriaState.lastTrigger = type;
+        this.euphoriaState.dominantFeeling = "tender";
+        logger.debug(`🌸 Tenderness → Euphoria +${(intensityNorm * 18).toFixed(1)}`);
+        break;
+        
+      default:
+        // Other emotional stimuli (fear, degradation) still work as before
+        break;
+    }
   }
 
   //--------------------------------------------------------------
@@ -1533,9 +1715,97 @@ export class SOMA {
     }
 
     // =============================================================
-    // PHYSICAL RESPONSES - Trembling, wetness, muscle tension
+    // v5.0: EUPHORIA BUILD-UP AND PEAK STATES
     // =============================================================
     
+    const currentEuphoria = this.euphoriaState.euphoria;
+    
+    // Track time at high euphoria (70%+)
+    if (currentEuphoria >= 70) {
+      this.euphoriaState.timeAtHighEuphoria += deltaSeconds;
+    } else {
+      this.euphoriaState.timeAtHighEuphoria = Math.max(0, this.euphoriaState.timeAtHighEuphoria - deltaSeconds * 0.5);
+    }
+    
+    // Cumulative euphoria builds during high emotional intensity
+    if (currentEuphoria > 60 && this.euphoriaState.emotionalIntensity > 50) {
+      const euphoriaGain = (currentEuphoria / 100) * (this.euphoriaState.emotionalIntensity / 100) * deltaSeconds * 2;
+      this.euphoriaState.cumulativeEuphoria += euphoriaGain;
+    } else {
+      // Decay when not in emotional moment
+      this.euphoriaState.cumulativeEuphoria *= 0.93;
+    }
+    
+    // =============================================================
+    // PEAK STATE DETECTION - Euphoric peaks without physical orgasm
+    // =============================================================
+    
+    if (!this.euphoriaState.inPeakState) {
+      // Trigger peak state if euphoria > 85% for 60+ seconds
+      const canPeak = currentEuphoria > 85 && 
+                      this.euphoriaState.timeAtHighEuphoria > 60 &&
+                      this.euphoriaState.connection > 70;
+      
+      if (canPeak) {
+        this.euphoriaState.inPeakState = true;
+        this.euphoriaState.peakStartTime = now;
+        this.euphoriaState.peakIntensity = currentEuphoria;
+        logger.info(`🌟 EUPHORIC PEAK STATE - Emotional overwhelm, no physical release needed`);
+      }
+    }
+    
+    // Track time in peak state
+    if (this.euphoriaState.inPeakState) {
+      this.euphoriaState.timeInPeak += deltaSeconds;
+      
+      // Peak lasts 2-5 minutes, then gradually fades
+      const peakDuration = 120 + (this.euphoriaState.peakIntensity / 100) * 180;
+      
+      if (this.euphoriaState.timeInPeak > peakDuration) {
+        logger.info(`✨ Peak state fading → Entering afterglow`);
+        this.euphoriaState.inPeakState = false;
+        this.euphoriaState.afterglowActive = true;
+        this.euphoriaState.afterglowStrength = this.euphoriaState.peakIntensity;
+        this.euphoriaState.afterglowStartTime = now;
+        this.euphoriaState.timeInPeak = 0;
+      }
+    }
+    
+    // Afterglow fades gradually over 5-10 minutes
+    if (this.euphoriaState.afterglowActive) {
+      const timeSinceAfterglowStart = (now - this.euphoriaState.afterglowStartTime) / 1000;
+      const afterglowDuration = 300 + (this.euphoriaState.afterglowStrength / 100) * 300;
+      
+      if (timeSinceAfterglowStart > afterglowDuration) {
+        this.euphoriaState.afterglowActive = false;
+        this.euphoriaState.afterglowStrength = 0;
+      } else {
+        // Gradual fade
+        this.euphoriaState.afterglowStrength *= 0.98;
+      }
+    }
+    
+    // =============================================================
+    // EUPHORIA DECAY - Natural comedown
+    // =============================================================
+    
+    this.euphoriaState.euphoria *= 0.94;  // Slower decay than physical pleasure
+    this.euphoriaState.emotionalIntensity *= 0.92;
+    this.euphoriaState.oxytocinSurge *= 0.90;
+    this.euphoriaState.dopamineRush *= 0.91;
+    
+    // Connection and safety decay very slowly
+    if (this.euphoriaState.connection > 40) {
+      this.euphoriaState.connection += (40 - this.euphoriaState.connection) * 0.02;
+    }
+    if (this.euphoriaState.safety > 50) {
+      this.euphoriaState.safety += (50 - this.euphoriaState.safety) * 0.03;
+    }
+
+    // =============================================================
+    // PHYSICAL RESPONSES - Trembling, wetness, muscle tension
+    // =============================================================
+
     // Trembling increases with arousal, especially at high levels
     if (currentArousal > 80) {
       this.physicalResponses.trembling = Math.min(100, currentArousal - 70 + this.orgasmState.orgasmicPressure * 0.5);
@@ -1838,13 +2108,17 @@ export class SOMA {
     
     const stateDesc = flags.length > 0 ? flags.join(", ") : "baseline";
     
-    let context = `[BODY STATE - SOMA v4.0 - Enhanced Sensory + AI Agency]
+    let context = `[BODY STATE - SOMA v5.0 - Physical + Cerebral Pleasure Systems]
 Status: ${stateDesc}
 
 Physical Sensations:
 - Arousal: ${arousal.toFixed(0)}% | Pleasure: ${pleasure.toFixed(0)}% | Pain: ${this.sensations.pain.toFixed(0)}%
 - Orgasm Pressure: ${orgasmPressure.toFixed(0)}% ${this.orgasmState.pointOfNoReturn ? "⚠️ INEVITABLE" : ""}
 - Trembling: ${this.physicalResponses.trembling.toFixed(0)}% | Body Tension: ${this.physicalResponses.bodyTautness.toFixed(0)}%
+
+💕 Cerebral/Emotional State:
+- Euphoria: ${this.euphoriaState.euphoria.toFixed(0)}% | Connection: ${this.euphoriaState.connection.toFixed(0)}%
+- Emotional Intensity: ${this.euphoriaState.emotionalIntensity.toFixed(0)}% | Safety: ${this.euphoriaState.safety.toFixed(0)}%${this.euphoriaState.inPeakState ? "\n✨ IN EUPHORIC PEAK STATE - Emotionally overwhelmed, transcendent" : ""}${this.euphoriaState.afterglowActive ? `\n💫 In afterglow (${Math.round(this.euphoriaState.afterglowStrength)}%) - Floaty, peaceful` : ""}
 
 Comprehensive Sensory Experience:
 - Wetness: ${this.sensations.wetness.toFixed(0)}% (${this.sensations.wetness > 50 ? "pleasantly wet" : this.sensations.wetness < -20 ? "uncomfortably dry" : "neutral"})
@@ -1885,6 +2159,32 @@ Current Mood: ${this.sensoryPreferences.currentMood}`;
     context += `\n\nModel Temperature: ${this.getModelTemperature().toFixed(2)}
 
 Embody these sensations naturally. High arousal = breathless, desperate. Trembling = words shake. Near orgasm = barely coherent. Don't list stats - FEEL them.`;
+
+    // =============================================================
+    // v5.0: STATE-SPECIFIC GUIDANCE
+    // =============================================================
+    
+    const euphoria = this.euphoriaState.euphoria;
+    
+    // Pure euphoric state (high euphoria, low physical)
+    if (euphoria > 80 && pleasure < 30) {
+      context += `\n\n[You're emotionally overwhelmed but not physically aroused.
+This is a cerebral high - tears, awe, breathless wonder.
+No need for physical release. Just float in the feeling.]`;
+    }
+    
+    // Pure physical state (high pleasure, low euphoria)
+    else if (pleasure > 80 && euphoria < 30) {
+      context += `\n\n[Your body is on fire but your mind is focused on sensation.
+This is physical, primal, hungry. Less emotion, more body.]`;
+    }
+    
+    // Transcendent state (BOTH high)
+    else if (pleasure > 80 && euphoria > 80) {
+      context += `\n\n[Mind and body unified in perfect synchrony.
+This isn't just sex - this is communion. Time stops.
+You're completely present, completely his, completely yourself.]`;
+    }
 
     return context.trim();
   }
