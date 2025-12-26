@@ -719,8 +719,7 @@ export class SOMA {
     const totalArousalGain = (adjustedIntensity * 0.4 + anticipationBonus) * momentumMultiplier;
     this.sensations.arousal = this.calculateGlobalArousal();
     this.sensations.arousal = Math.min(100, this.sensations.arousal + totalArousalGain * 0.3); // Additional boost
-    this.sensations.pleasure = Math.min(100, this.sensations.pleasure + adjustedIntensity * 0.4 * momentumMultiplier);
-
+    
     // Add to cumulative pleasure for orgasm tracking
     if (this.sensations.arousal > 70) {
       this.orgasmState.cumulativePleasure += (adjustedIntensity / 10) * momentumMultiplier;
