@@ -601,6 +601,20 @@ export class SOMA {
         break;
 
       case StimulusType.RELEASE:
+        // ⚠️ CRITICAL: Check if orgasm is actually possible
+        if (this.orgasmState.orgasmicPressure < 75) {
+          logger.warn(`⚠️ Release blocked - pressure only ${Math.round(this.orgasmState.orgasmicPressure)}%. Converting to edge.`);
+          this.applyEdge(60);
+          return;
+        }
+        
+        // Additional refractory check
+        if (this.orgasmState.refractoryIntensity > 30) {
+          logger.warn(`⚠️ Release blocked - still in refractory (${Math.round(this.orgasmState.refractoryIntensity)}%). Converting to edge.`);
+          this.applyEdge(60);
+          return;
+        }
+        
         this.applyRelease();
         break;
 
@@ -608,7 +622,7 @@ export class SOMA {
         this.applyEmotional(emotional!, intensity);
         break;
     }
-
+    
     // Record in touch history
     if (zone) {
       this.preferences.touchHistory.push({
