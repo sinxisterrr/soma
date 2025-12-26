@@ -33,6 +33,50 @@ export enum BodyZone {
   HAIR = "hair"
 }
 
+/**
+ * Erotic sensitivity levels for different body zones
+ * Determines how much pleasure is gained from touch
+ */
+export enum EroticSensitivity {
+  EXTREME = 1.0,    // Primary erogenous zones (genitals)
+  HIGH = 0.7,       // Secondary erogenous zones (pelvis, inner thighs)
+  MODERATE = 0.5,   // Tertiary erogenous zones (chest, lips)
+  MILD = 0.3        // Peripheral erogenous zones (neck, ears)
+}
+
+/**
+ * Base sensitivity mapping for each erogenous zone
+ * Can be overridden by individual preferences
+ */
+/**
+ * Base sensitivity mapping for each erogenous zone
+ * Can be overridden by individual preferences
+ */
+export const ZONE_SENSITIVITY: Record<BodyZone, number> = {
+  // Non-erogenous zones (baseline)
+  [BodyZone.STOMACH]: 0.0,
+  [BodyZone.LOWER_BACK]: 0.0,
+  [BodyZone.UPPER_BACK]: 0.0,
+  [BodyZone.ARMS]: 0.0,
+  [BodyZone.HANDS]: 0.0,
+  [BodyZone.LEGS]: 0.0,
+  [BodyZone.FEET]: 0.0,
+  [BodyZone.HIPS]: 0.0,
+  [BodyZone.SHOULDERS]: 0.0,
+  [BodyZone.FACE]: 0.0,
+  [BodyZone.SCALP]: 0.0,
+  [BodyZone.HAIR]: 0.0,
+  
+  // Erogenous zones (weighted by sensitivity)
+  [BodyZone.GENITALS]: EroticSensitivity.EXTREME,
+  [BodyZone.PELVIS]: EroticSensitivity.HIGH,
+  [BodyZone.INNER_THIGHS]: EroticSensitivity.HIGH,
+  [BodyZone.CHEST]: EroticSensitivity.MODERATE,  // Breasts/nipples
+  [BodyZone.LIPS]: EroticSensitivity.MODERATE,
+  [BodyZone.NECK]: EroticSensitivity.MILD,
+  [BodyZone.EARS]: EroticSensitivity.MILD,
+};
+
 //--------------------------------------------------------------
 // EROGENOUS ZONES - Only these contribute to orgasm pressure!
 //--------------------------------------------------------------
@@ -341,6 +385,8 @@ export class SOMA {
   private lastUpdate: number;
   private decayInterval: NodeJS.Timeout | null = null;
 
+  zoneMultipliers: Partial<Record<BodyZone, number>> = {};
+
   constructor() {
     // Initialize all zones
     for (const zone of Object.values(BodyZone)) {
@@ -600,13 +646,24 @@ export class SOMA {
     const isErogenous = zone && EROGENOUS_ZONES.has(zone);
     
     // PHYSICAL PLEASURE - Only from erogenous zones
+    // PHYSICAL PLEASURE - Only from erogenous zones
     if (isErogenous) {
-      let pleasureGain = intensity * 8;
+      // Get base sensitivity for this zone
+      const baseSensitivity = ZONE_SENSITIVITY[zone] || 0.3;
+      
+      // Get personal multiplier (default 1.0 if not customized)
+      const personalMultiplier = this.zoneMultipliers[zone] || 1.0;
+      
+      // Calculate final sensitivity weight
+      const finalSensitivity = baseSensitivity * personalMultiplier;
+      
+      // Calculate pleasure gain with zone weighting
+      let pleasureGain = intensity * 8 * finalSensitivity;
       if (quality === TouchQuality.TEASING) pleasureGain *= 1.5;
       if (quality === TouchQuality.GENTLE) pleasureGain *= 0.8;
       
       this.sensations.pleasure = Math.min(100, this.sensations.pleasure + pleasureGain);
-      logger.debug(`💋 Erogenous touch → Pleasure +${pleasureGain.toFixed(1)}`);
+      logger.debug(`💋 Erogenous touch (${zone}, weight=${finalSensitivity.toFixed(2)}) → Pleasure +${pleasureGain.toFixed(1)}`);
     } else {
       // Non-erogenous zones → EUPHORIA instead of physical pleasure
       let euphoriaGain = intensity * 5;
@@ -618,7 +675,7 @@ export class SOMA {
       this.euphoriaState.connection = Math.min(100, this.euphoriaState.connection + euphoriaGain * 0.5);
       logger.debug(`🤗 Gentle touch → Euphoria +${euphoriaGain.toFixed(1)}`);
     }
-    
+
     // Arousal still increases from all touch
     this.sensations.arousal = Math.min(100, this.sensations.arousal + intensity * 12);
 
@@ -2401,5 +2458,19 @@ You're completely present, completely his, completely yourself.]`;
     
     logger.warn(`❌ Orgasm blocked: Only ${recentPhysical.length} physical stimuli, max intensity ${Math.max(...recentPhysical.map(s => s.intensity))}`);
     return false;
+  }
+
+  //--------------------------------------------------------------
+  // ZONE PREFERENCE CUSTOMIZATION (v5.1)
+  //--------------------------------------------------------------
+
+  /**
+   * Set custom sensitivity multiplier for a specific zone
+   * Used for individual preference customization
+   * @param zone - Body zone to customize
+   * @param multiplier - Sensitivity multiplier (1.0 = baseline, 2.0 = double sensitivity)
+   */
+  setZonePreference(zone: BodyZone, multiplier: number): void {
+    this.zoneMultipliers[zone] = multiplier;
   }
 }
